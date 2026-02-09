@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	pubsub "github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -13,28 +16,57 @@ import (
 
 func main() {
 	fmt.Println("Starting Peril server...")
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	connection, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	if err != nil {
-		fmt.Println("Got an error starting amqp connection")
+		log.Fatalf("Could not connect to RabbitMQ: %v", err)
 	}
 	defer connection.Close()
 
-	fmt.Println("Successfull connection to amqp")
-
 	channel, err := connection.Channel()
 	if err != nil {
-		fmt.Println("Got an error creating a channel")
+		log.Fatalf("Could not open channel: %v", err)
 	}
+
+	go func() {
+		<-ctx.Done()
+		fmt.Println("\nShutdown signal received. Cleaning up...")
+		fmt.Println("Goodbye!")
+		os.Exit(0)
+	}()
 
 	pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
 		IsPaused: true,
 	})
 
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signalChan)
+	gamelogic.PrintServerHelp()
 
-	<-signalChan
-	fmt.Println("Shutdown signal received, initiating shutdown...")
-	os.Exit(1)
+	for {
+		words := gamelogic.GetInput()
+		if len(words) == 0 {
+			continue
+		}
+
+		switch cmd := words[0]; cmd {
+		case "pause":
+			fmt.Println("Pausing a game")
+			pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
+				IsPaused: true,
+			})
+		case "resume":
+			fmt.Println("Resuming a game")
+			pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
+				IsPaused: false,
+			})
+		case "quit":
+			fmt.Println("Exiting...")
+			return
+		default:
+			fmt.Printf("Unknown command: %s\n", cmd)
+			continue
+		}
+	}
 }
