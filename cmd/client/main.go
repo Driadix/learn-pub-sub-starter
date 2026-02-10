@@ -15,17 +15,21 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
-	return func(ps routing.PlayingState) {
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.ACKType {
+	return func(ps routing.PlayingState) pubsub.ACKType {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
+		return pubsub.Ack
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
-	return func(am gamelogic.ArmyMove) {
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.ACKType {
+	return func(am gamelogic.ArmyMove) pubsub.ACKType {
 		defer fmt.Print("> ")
-		gs.HandleMove(am)
+		if outcome := gs.HandleMove(am); outcome == gamelogic.MoveOutComeSafe || outcome == gamelogic.MoveOutcomeMakeWar {
+			return pubsub.Ack
+		}
+		return pubsub.NackDiscard
 	}
 }
 

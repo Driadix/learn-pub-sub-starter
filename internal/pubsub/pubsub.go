@@ -56,6 +56,14 @@ func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	return nil
 }
 
+type ACKType int
+
+const (
+	Ack ACKType = iota
+	NackRequeue
+	NackDiscard
+)
+
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
@@ -63,7 +71,7 @@ func SubscribeJSON[T any](
 	key string,
 	queueType SimpleQueueType,
 	wg *sync.WaitGroup,
-	handler func(T),
+	handler func(T) ACKType,
 ) error {
 	channel, _, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
 	if err != nil {
@@ -89,8 +97,15 @@ func SubscribeJSON[T any](
 				d.Nack(false, false)
 				continue
 			}
-			handler(payload)
-			d.Ack(false)
+			switch ackType := handler(payload); ackType {
+			case Ack:
+				d.Ack(false)
+			case NackRequeue:
+				d.Nack(false, true)
+			case NackDiscard:
+				d.Nack(false, false)
+			}
+
 		}
 	}()
 	return nil
