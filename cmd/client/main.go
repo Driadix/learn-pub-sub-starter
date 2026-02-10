@@ -8,12 +8,28 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+func publishGameLog(publishChannel *amqp.Channel, username, message string) error {
+	gameLog := routing.GameLog{
+		CurrentTime: time.Now(),
+		Message:     message,
+		Username:    username,
+	}
+
+	routingKey := routing.GameLogSlug + "." + username
+	err := pubsub.PublishGob(publishChannel, routing.ExchangePerilTopic, routingKey, gameLog)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.ACKType {
 	return func(ps routing.PlayingState) pubsub.ACKType {
@@ -45,23 +61,32 @@ func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyM
 	}
 }
 
-func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.ACKType {
-	return func(row gamelogic.RecognitionOfWar) pubsub.ACKType {
+func handlerWar(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.RecognitionOfWar) pubsub.ACKType {
+	return func(rw gamelogic.RecognitionOfWar) pubsub.ACKType {
 		defer fmt.Print("> ")
-		outcome, _, _ := gs.HandleWar(row)
+		outcome, winner, loser := gs.HandleWar(rw)
+
 		switch outcome {
 		case gamelogic.WarOutcomeNotInvolved:
 			return pubsub.NackRequeue
 		case gamelogic.WarOutcomeNoUnits:
 			return pubsub.NackDiscard
-		case gamelogic.WarOutcomeOpponentWon:
-			return pubsub.Ack
-		case gamelogic.WarOutcomeYouWon:
-			return pubsub.Ack
-		case gamelogic.WarOutcomeDraw:
+		case gamelogic.WarOutcomeOpponentWon, gamelogic.WarOutcomeYouWon, gamelogic.WarOutcomeDraw:
+			var msg string
+			if outcome == gamelogic.WarOutcomeDraw {
+				msg = fmt.Sprintf("A war between %s and %s resulted in a draw", winner, loser)
+			} else {
+				msg = fmt.Sprintf("%s won a war against %s", winner, loser)
+			}
+
+			err := publishGameLog(ch, rw.Attacker.Username, msg)
+			if err != nil {
+				fmt.Printf("error: failed to publish game log: %v\n", err)
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		default:
-			fmt.Printf("Got unknown war outcome: %v", outcome)
+			fmt.Printf("error: unknown war outcome: %v\n", outcome)
 			return pubsub.NackDiscard
 		}
 	}
@@ -116,7 +141,7 @@ func main() {
 
 	warRoutingKey := routing.WarRecognitionsPrefix + ".*"
 	warQueueName := routing.WarRecognitionsPrefix
-	err = pubsub.SubscribeJSON(connection, routing.ExchangePerilTopic, warQueueName, warRoutingKey, pubsub.DurableQueue, &wg, handlerWar(gameState))
+	err = pubsub.SubscribeJSON(connection, routing.ExchangePerilTopic, warQueueName, warRoutingKey, pubsub.DurableQueue, &wg, handlerWar(gameState, channel))
 	if err != nil {
 		log.Fatalf("Got an error subscribing to war: %v", err)
 	}
