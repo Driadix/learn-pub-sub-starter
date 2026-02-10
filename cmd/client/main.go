@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
@@ -14,8 +15,17 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+	return func(ps routing.PlayingState) {
+		defer fmt.Print("> ")
+		gs.HandlePause(ps)
+	}
+}
+
 func main() {
 	fmt.Println("Starting Peril client...")
+
+	var wg sync.WaitGroup
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -24,6 +34,7 @@ func main() {
 		<-ctx.Done()
 		fmt.Println("\nShutdown signal received. Cleaning up...")
 		fmt.Println("Goodbye!")
+		wg.Wait()
 		os.Exit(0)
 	}()
 
@@ -39,13 +50,12 @@ func main() {
 		log.Fatalf("Got an error while client Welcome operation: %v", err)
 	}
 
-	queueName := routing.PauseKey + "." + username
-	_, _, err = pubsub.DeclareAndBind(connection, routing.ExchangePerilDirect, queueName, routing.PauseKey, pubsub.TransientQueue)
-	if err != nil {
-		log.Fatalf("Got an error creating and binding a queue: %v", err)
-	}
-
 	gameState := gamelogic.NewGameState(username)
+	queueName := routing.PauseKey + "." + username
+	err = pubsub.SubscribeJSON(connection, routing.ExchangePerilDirect, queueName, routing.PauseKey, pubsub.TransientQueue, &wg, handlerPause(gameState))
+	if err != nil {
+		log.Fatalf("Got an error subscribing: %v", err)
+	}
 
 	for {
 		words := gamelogic.GetInput()
