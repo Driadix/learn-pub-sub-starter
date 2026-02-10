@@ -20,6 +20,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	go func() {
+		<-ctx.Done()
+		fmt.Println("\nShutdown signal received. Cleaning up...")
+		fmt.Println("Goodbye!")
+		os.Exit(0)
+	}()
+
 	connection, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	if err != nil {
 		log.Fatalf("Could not connect to RabbitMQ: %v", err)
@@ -30,13 +37,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Could not open channel: %v", err)
 	}
-
-	go func() {
-		<-ctx.Done()
-		fmt.Println("\nShutdown signal received. Cleaning up...")
-		fmt.Println("Goodbye!")
-		os.Exit(0)
-	}()
 
 	pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
 		IsPaused: true,
