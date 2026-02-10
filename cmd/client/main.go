@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,20 +29,20 @@ func main() {
 
 	connection, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	if err != nil {
-		fmt.Println("Got an error starting amqp connection")
+		log.Fatalf("Got an error starting amqp connection: %v", err)
 	}
 	defer connection.Close()
 
 	fmt.Println("Successfull connection to amqp")
 	username, err := gamelogic.ClientWelcome()
 	if err != nil {
-		fmt.Println("Got an error while client Welcome operation")
+		log.Fatalf("Got an error while client Welcome operation: %v", err)
 	}
 
 	queueName := routing.PauseKey + "." + username
 	_, _, err = pubsub.DeclareAndBind(connection, routing.ExchangePerilDirect, queueName, routing.PauseKey, pubsub.TransientQueue)
 	if err != nil {
-		fmt.Printf("Got an error creating and binding a queue: %v", err)
+		log.Fatalf("Got an error creating and binding a queue: %v", err)
 	}
 
 	gameState := gamelogic.NewGameState(username)

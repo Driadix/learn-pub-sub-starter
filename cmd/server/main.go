@@ -44,6 +44,12 @@ func main() {
 
 	gamelogic.PrintServerHelp()
 
+	gameLogRoutingKey := routing.GameLogSlug + ".*"
+	_, _, err = pubsub.DeclareAndBind(connection, routing.ExchangePerilTopic, routing.GameLogSlug, gameLogRoutingKey, pubsub.DurableQueue)
+	if err != nil {
+		log.Fatalf("Got an error creating and binding a queue: %v", err)
+	}
+
 	for {
 		words := gamelogic.GetInput()
 		if len(words) == 0 {
