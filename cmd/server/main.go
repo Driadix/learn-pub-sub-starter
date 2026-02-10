@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
@@ -14,16 +15,31 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+func handlerLogs() func(routing.GameLog) pubsub.ACKType {
+	return func(gl routing.GameLog) pubsub.ACKType {
+		defer fmt.Print("> ")
+		err := gamelogic.WriteLog(gl)
+		if err != nil {
+			fmt.Printf("Got an error trying to write a log: %v", err)
+			return pubsub.NackDiscard
+		}
+		return pubsub.Ack
+	}
+}
+
 func main() {
 	fmt.Println("Starting Peril server...")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	var wg sync.WaitGroup
+
 	go func() {
 		<-ctx.Done()
 		fmt.Println("\nShutdown signal received. Cleaning up...")
 		fmt.Println("Goodbye!")
+		wg.Wait()
 		os.Exit(0)
 	}()
 
@@ -45,6 +61,7 @@ func main() {
 	gamelogic.PrintServerHelp()
 
 	gameLogRoutingKey := routing.GameLogSlug + ".*"
+	pubsub.SubscribeGob(connection, routing.ExchangePerilTopic, routing.GameLogSlug, gameLogRoutingKey, pubsub.DurableQueue, &wg, handlerLogs())
 	_, _, err = pubsub.DeclareAndBind(connection, routing.ExchangePerilTopic, routing.GameLogSlug, gameLogRoutingKey, pubsub.DurableQueue)
 	if err != nil {
 		log.Fatalf("Got an error creating and binding a queue: %v", err)

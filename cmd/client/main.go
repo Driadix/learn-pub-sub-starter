@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -173,7 +174,32 @@ func main() {
 		case "help":
 			gamelogic.PrintClientHelp()
 		case "spam":
-			fmt.Printf("Spamming not allowed yet!\n")
+			if len(words) < 2 {
+				fmt.Printf("usage: spam <n>")
+				continue
+			}
+			numberOfLogsStr := words[1]
+			numberOfLogs, err := strconv.ParseInt(numberOfLogsStr, 10, 64)
+			if numberOfLogs <= 0 {
+				fmt.Printf("number of logs should be positive number")
+				continue
+			}
+			if err != nil {
+				fmt.Printf("An error occurred while converting str to int: %v", err)
+				continue
+			}
+			for i := 0; i < int(numberOfLogs); i++ {
+				maliciousLog := gamelogic.GetMaliciousLog()
+				gameLogsRoutingKey := routing.GameLogSlug + "." + username
+				err = pubsub.PublishGob(channel, routing.ExchangePerilTopic, gameLogsRoutingKey, routing.GameLog{
+					CurrentTime: time.Now(),
+					Username:    username,
+					Message:     maliciousLog,
+				})
+				if err != nil {
+					fmt.Printf("An error occured publishing malicious log: %v", err)
+				}
+			}
 		case "quit":
 			gamelogic.PrintQuit()
 			return
